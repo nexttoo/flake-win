@@ -22,19 +22,65 @@ FLAKE_MAX_SPRITE = 28
 # --------------------------------------------------------------------------- #
 
 class SpriteCache:
-    def __init__(self) -> None:
-        self._cache: dict[tuple[int, int], QImage] = {}
+    # Логические диаметры снежинок: считаем по ближайшему, а не по точному —
+    # так кэш маленький, а отрисовка идёт без масштабирования.
+    FLAKE_SIZES = (2.5, 3.5, 4.5, 5.5, 6.5, 8.0, 9.5, 11.5)
 
-    def flake(self, diameter: int, variant: int) -> QImage:
-        d = max(3, min(FLAKE_MAX_SPRITE, int(diameter)))
-        key = (d, variant)
+    def __init__(self) -> None:
+        self._cache: dict[tuple, QImage] = {}
+
+    def flake(self, diameter: float, variant: int, dpr: float = 1.0) -> QImage:
+        nearest = min(self.FLAKE_SIZES, key=lambda s: abs(s - diameter))
+        key = ("flake", nearest, variant, round(dpr, 2))
         img = self._cache.get(key)
         if img is None:
-            img = self._build(d, variant)
+            img = self._build(max(3, int(round(nearest * dpr))), variant)
+            img.setDevicePixelRatio(dpr)
+            self._cache[key] = img
+        return img
+
+    def sphere(self, radius: float, dpr: float = 1.0) -> QImage:
+        rounded = max(3, min(64, int(round(radius))))
+        key = ("sphere", rounded, round(dpr, 2))
+        img = self._cache.get(key)
+        if img is None:
+            img = self._build_sphere(max(4, int(round(rounded * dpr))))
+            img.setDevicePixelRatio(dpr)
             self._cache[key] = img
         return img
 
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _build_sphere(radius: int) -> QImage:
+        """Снежный шар: подсветка сверху-слева, холодный низ, пухлая кромка."""
+        pad = 4
+        size = int(radius * 2) + pad * 2
+        img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+        img.fill(Qt.GlobalColor.transparent)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(Qt.PenStyle.NoPen)
+        c = size / 2.0
+        r = float(radius)
+
+        grad = QRadialGradient(c - r * 0.34, c - r * 0.40, max(0.8, r * 1.62))
+        grad.setColorAt(0.0, QColor(255, 255, 255, 255))
+        grad.setColorAt(0.38, QColor(251, 253, 255, 255))
+        grad.setColorAt(0.72, QColor(232, 240, 252, 255))
+        grad.setColorAt(0.92, QColor(203, 217, 238, 255))
+        grad.setColorAt(1.0, QColor(188, 204, 229, 235))
+        p.setBrush(QBrush(grad))
+        p.drawEllipse(QPointF(c, c), r, r)
+
+        halo = QRadialGradient(c, c, r * 1.05)
+        halo.setColorAt(0.88, QColor(255, 255, 255, 0))
+        halo.setColorAt(0.97, QColor(255, 255, 255, 38))
+        halo.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setBrush(QBrush(halo))
+        p.drawEllipse(QPointF(c, c), r * 1.06, r * 1.06)
+        p.end()
+        return img
+
     @staticmethod
     def _build(size: int, variant: int) -> QImage:
         img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
@@ -94,12 +140,14 @@ class SpriteCache:
 class Renderer:
     def __init__(self) -> None:
         self.sprites = SpriteCache()
+        self._dpr = 1.0
         self._snow_font = QFont("Segoe UI", 8)
         self._snow_font.setBold(True)
 
     # ------------------------------------------------------------------ #
     def draw(self, p: QPainter, sim: Simulator, dpr: float,
              screen_rect: QRectF) -> None:
+        self._dpr = dpr
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
@@ -239,14 +287,11 @@ class Renderer:
         for x, y, size, op, ph in zip(xs, ys, sizes, ops, phases):
             if x < left or x > right or y < top or y > bottom:
                 continue
-            diameter = size * 2.0
-            if diameter < 2.0:
-                diameter = 2.0
             variant = int(ph * 7.0) % 4
-            sprite = self.sprites.flake(int(round(diameter * dpr)), variant)
-            half = (sprite.width() / dpr) * 0.5
+            sprite = self.sprites.flake(size * 2.0, variant, dpr)
+            half = sprite.width() / (2.0 * dpr)
             p.setOpacity(max(0.05, min(1.0, op)))
-            p.drawImage(QRectF(x - half, y - half, half * 2, half * 2), sprite)
+            p.drawImage(QPointF(x - half, y - half), sprite)
         p.setOpacity(1.0)
 
     # ------------------------------------------------------------------ #
@@ -279,6 +324,8 @@ class Renderer:
         return out
 
     def _draw_surface(self, p: QPainter, surface, screen_rect: QRectF) -> None:
+        import numpy as np
+
         h = surface.h
         cell = surface.cell
         n = h.size
@@ -288,37 +335,45 @@ class Renderer:
         corner = surface.corner
         base_y = surface.top
 
-        profile: list[tuple[float, float]] = []
-        for i in range(n):
-            local = i * cell
-            if local < 0.5 or local > surface.width - 0.5:
-                continue
-            height = float(h[i])
-            if height <= 0.05:
-                continue
-            dist = min(local, surface.width - local)
-            if dist < corner:
-                t = max(0.0, dist - 0.5) / max(0.5, corner - 0.5)
-                height *= t * t * (3.0 - 2.0 * t)
-            if height <= 0.05:
-                continue
-            profile.append((surface.x + local, height))
+        # Прореживаем профиль: шаг ~6 px, глазу незаметно, работы втрое меньше.
+        step = max(1, int(round(6.0 / cell)))
+        idx = np.arange(0, n, step)
+        local = idx * cell
+        heights = h[idx]
 
-        if len(profile) < 2:
+        dist = np.minimum(local, surface.width - local)
+        if corner > 0.5:
+            t = np.clip((dist - 0.5) / max(0.5, corner - 0.5), 0.0, 1.0)
+            taper = t * t * (3.0 - 2.0 * t)
+            heights = np.where(dist < corner, heights * taper, heights)
+        heights = np.where(heights > 0.05, heights, 0.0)
+
+        keep = (heights > 0.05) & (local >= 0.5) & (local <= surface.width - 0.5)
+        if int(keep.sum()) < 2:
             return
 
-        # Сглаживание гребня: несколько проходов «1-2-1» — сугроб, а не гистограмма.
-        heights = [ph for _, ph in profile]
-        xs = [px for px, _ in profile]
-        smoothed = self._blur(heights, 3)
-        peak = max(smoothed) if smoothed else 1.0
+        xs = surface.x + local[keep]
+        hs = heights[keep]
+
+        # Сглаживание гребня «1-2-1» уже на numpy.
+        smoothed = hs.astype(np.float32).copy()
+        for _ in range(3):
+            if smoothed.size >= 3:
+                smoothed[1:-1] = (smoothed[:-2] * 0.25 + smoothed[1:-1] * 0.5
+                                  + smoothed[2:] * 0.25)
+        peak = float(smoothed.max()) if smoothed.size else 1.0
+
+        xs_list = xs.tolist()
+        hs_list = smoothed.tolist()
+        if len(xs_list) < 2:
+            return
 
         poly = QPolygonF()
-        poly.append(QPointF(xs[0], base_y))
-        for px, hh in zip(xs, smoothed):
+        poly.append(QPointF(xs_list[0], base_y))
+        for px, hh in zip(xs_list, hs_list):
             poly.append(QPointF(px, base_y - hh))
-        poly.append(QPointF(xs[-1], base_y))
-        poly.append(QPointF(xs[0], base_y))
+        poly.append(QPointF(xs_list[-1], base_y))
+        poly.append(QPointF(xs_list[0], base_y))
 
         path = QPainterPath()
         path.addPolygon(poly)
@@ -335,8 +390,8 @@ class Renderer:
 
         # Тёплый блик по гребню.
         crest = QPainterPath()
-        crest.moveTo(xs[0], base_y - smoothed[0])
-        for px, hh in zip(xs[1:], smoothed[1:]):
+        crest.moveTo(xs_list[0], base_y - hs_list[0])
+        for px, hh in zip(xs_list[1:], hs_list[1:]):
             crest.lineTo(px, base_y - hh)
         pen = QPen(QColor(255, 255, 255, 205))
         pen.setWidthF(1.1)
@@ -348,7 +403,8 @@ class Renderer:
         shadow = QPen(QColor(150, 176, 210, 60))
         shadow.setWidthF(1.4)
         p.setPen(shadow)
-        p.drawLine(QPointF(xs[0], base_y + 0.8), QPointF(xs[-1], base_y + 0.8))
+        p.drawLine(QPointF(xs_list[0], base_y + 0.8),
+                   QPointF(xs_list[-1], base_y + 0.8))
 
     # ------------------------------------------------------------------ #
     def _draw_balls(self, p: QPainter, sim: Simulator) -> None:
@@ -358,23 +414,9 @@ class Renderer:
     def _sphere(self, p: QPainter, cx: float, cy: float, r: float) -> None:
         if r < 0.6:
             return
-        grad = QRadialGradient(cx - r * 0.34, cy - r * 0.40, max(0.8, r * 1.62))
-        grad.setColorAt(0.0, QColor(255, 255, 255, 255))
-        grad.setColorAt(0.38, QColor(251, 253, 255, 255))
-        grad.setColorAt(0.72, QColor(232, 240, 252, 255))
-        grad.setColorAt(0.92, QColor(203, 217, 238, 255))
-        grad.setColorAt(1.0, QColor(188, 204, 229, 235))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(grad))
-        p.drawEllipse(QPointF(cx, cy), r, r)
-
-        # Мягкая кромка-«пух».
-        halo = QRadialGradient(cx, cy, r * 1.05)
-        halo.setColorAt(0.88, QColor(255, 255, 255, 0))
-        halo.setColorAt(0.97, QColor(255, 255, 255, 38))
-        halo.setColorAt(1.0, QColor(255, 255, 255, 0))
-        p.setBrush(QBrush(halo))
-        p.drawEllipse(QPointF(cx, cy), r * 1.06, r * 1.06)
+        sprite = self.sprites.sphere(r, self._dpr)
+        half = sprite.width() / (2.0 * self._dpr)
+        p.drawImage(QPointF(cx - half, cy - half), sprite)
 
     # ------------------------------------------------------------------ #
     def _draw_snowmen(self, p: QPainter, sim: Simulator) -> None:

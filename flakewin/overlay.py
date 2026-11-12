@@ -177,6 +177,16 @@ class OverlayEngine(QObject):
     # ------------------------------------------------------------------ #
     def tick(self) -> None:
         now = time.perf_counter()
+        # Чем больше снега, тем дешевле кадр: снег медленный, реже — не заметно.
+        count = self.sim.field.count
+        if count >= 2000:
+            fps = 20.0
+        elif count >= 1200:
+            fps = 24.0
+        else:
+            fps = 30.0
+        fps = min(fps, float(self._fps))
+        self._frame_time = 1.0 / max(12.0, fps)
         dt = now - self._last
         if dt < self._frame_time * 0.72:
             return

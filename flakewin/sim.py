@@ -303,6 +303,10 @@ class Simulator:
         self.intensity = float(settings["intensity"])
         self.mouse_enabled = bool(settings["mouse_enabled"])
         self.paused = bool(settings["paused"])
+        self.wind_scale = 1.0
+        self.swirl_scale = 1.0
+        self.phase_scale = 1.0
+        self._update_scales()
 
         self.mouse_x = -10000.0
         self.mouse_y = -10000.0
@@ -400,7 +404,7 @@ class Simulator:
     def _update_wind(self, dt: float) -> None:
         self.wind_timer -= dt
         if self.wind_timer <= 0:
-            nxt = random.uniform(-22, 22)
+            nxt = random.uniform(-22, 22) * self.wind_scale
             if random.random() < 0.18:
                 nxt *= random.uniform(1.5, 2.2)
             self.wind_target = nxt
@@ -412,9 +416,11 @@ class Simulator:
         screens = self.world.screens
         if not screens:
             return
-        cap = min(2200, int(1200 * len(screens) * max(1.0, self.intensity)))
+        # Потолок должен расти вместе с интенсивностью, иначе «Мало»/«Средне»/
+        # «Много» упираются в один лимит и выглядят одинаково.
+        cap = min(2800, int(2000 * len(screens) * self.intensity))
         blocked = self.snapshot.blocked
-        per_point = 0.07 * self.intensity
+        per_point = 0.095 * self.intensity
 
         for screen in screens:
             rect = screen.logical
@@ -455,13 +461,13 @@ class Simulator:
         mass = np.clip(f.size / 3.4, 0.35, 1.7)
         flutter = np.maximum(0.35, f.wobble)
 
-        f.phase += dt * (1.5 + flutter * 1.7 + (2.0 - mass) * 0.6)
+        f.phase += dt * (1.5 + flutter * 1.7 + (2.0 - mass) * 0.6) * self.phase_scale
         terminal = 26.0 + mass * 58.0
         f.vy += (terminal - f.vy) * dt * (0.28 + 0.22 * mass)
         wind_catch = 0.1 + 0.28 / mass
         f.vx += (self.wind * (0.65 + 0.55 / mass) - f.vx) * dt * wind_catch
         sway = (np.sin(f.phase) * 12.0 * flutter
-                + np.sin(f.phase * 2.31 + 0.7) * 5.5 * flutter)
+                + np.sin(f.phase * 2.31 + 0.7) * 5.5 * flutter) * self.swirl_scale
         bob = np.cos(f.phase * 1.63) * (4.2 * flutter / mass)
         f.x += (f.vx + sway) * dt
         f.y += (f.vy + bob) * dt
@@ -1379,6 +1385,14 @@ class Simulator:
     # ------------------------------------------------------------------ #
     def set_intensity(self, value: float) -> None:
         self.intensity = max(0.25, min(1.4, float(value)))
+        self._update_scales()
+
+    def _update_scales(self) -> None:
+        """Чем сильнее снегопад, тем злее ветер и заметнее кружение."""
+        extra = max(0.0, self.intensity - 0.7)
+        self.wind_scale = 1.0 + extra * 0.9
+        self.swirl_scale = 1.0 + extra * 1.2
+        self.phase_scale = 0.9 + extra * 0.7
 
     def has_blocked_screens(self) -> bool:
         return bool(self.snapshot.blocked)

@@ -32,7 +32,7 @@ class Settings:
     def load(self) -> None:
         try:
             if SETTINGS_PATH.exists():
-                raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+                raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8-sig"))
                 if isinstance(raw, dict):
                     for key, value in raw.items():
                         if key in DEFAULTS:
