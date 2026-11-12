@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Сборка PyInstaller
+build/
+dist/
+*.spec
+
+# Рабочие артефакты и скриншоты разработки
+/selftest.png
+/_icon_*.png
+/*.log
+/run.out
+/desktop_*.png
+/crop_*.png
+/window_drift*.png
+/exe_test.png
+/text_test.png
+/bisect.png
+/sign_test.png
+/snowman_test.png
+/snowman2.png
+/t.py
+/t2.py
+/t3.py
+/t4.py
+/t5.py
+/t6.py
+/t7.py
+/crop.py
+/shot.cs
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
