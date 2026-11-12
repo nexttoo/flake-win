@@ -12,7 +12,7 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QImage,
                            QLinearGradient, QPainter, QPainterPath, QPen,
                            QPolygonF, QRadialGradient)
 
-from .sim import Simulator, Snowball, Snowman
+from .sim import CRUMBLE_TIME, Simulator, Snowball, Snowman
 
 FLAKE_MAX_SPRITE = 28
 
@@ -382,6 +382,12 @@ class Renderer:
             self._draw_snowman(p, man)
 
     def _draw_snowman(self, p: QPainter, man: Snowman) -> None:
+        p.save()
+        if man.crumble > 0.0:
+            # Осыпается: тает и чуть проседает.
+            alpha = max(0.0, min(1.0, man.crumble / CRUMBLE_TIME))
+            p.setOpacity(alpha)
+            p.translate(0.0, (1.0 - alpha) * 9.0)
         bx, by = man.pose_base
         mx, my = man.pose_mid
         hx, hy = man.pose_head
@@ -433,6 +439,8 @@ class Renderer:
         if man.throw_t > 0.0 and not man.throw_released and man.throw_t < 0.48:
             tx, ty = man.arm_tip(man.throw_side < 0)
             self._sphere(p, tx, ty, max(4.5, min(7.5, man.mid_r * 0.38)))
+
+        p.restore()
 
     def _draw_arm(self, p: QPainter, man: Snowman, left: bool) -> None:
         brown = QColor(102, 61, 31)

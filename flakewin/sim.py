@@ -19,10 +19,13 @@ BALL_MAX_MASS = 4000.0
 BALL_VISUAL_MAX_RADIUS = 420.0
 MAX_BALLS = 24
 BALL_SPAWN_THRESHOLD = 11.0
-# Больше четырёх снеговиков на столе — уже нашествие.
-MAX_SNOWMEN = 4
-# Сколько живёт снежок, брошенный снеговиком (потом тает).
-THROWN_BALL_TTL = 9.0
+# Снеговики размножаются сами — это забавно, но у каждого есть срок жизни.
+MAX_SNOWMEN = 12
+# Через сколько снеговик рассыпается в снег (секунды).
+SNOWMAN_LIFE_MIN = 180.0
+SNOWMAN_LIFE_MAX = 300.0
+# Длительность «осыпания» перед исчезновением.
+CRUMBLE_TIME = 0.7
 
 
 # --------------------------------------------------------------------------- #
@@ -40,7 +43,7 @@ class Snowball:
     stacked_on: "Snowball | None" = None
     resting: str | None = None
     spun: float = 0.0
-    # Снежок, брошенный снеговиком: не годится как строительный материал и тает.
+    # Снежок, брошенный снеговиком: годится в постройку, но через время тает.
     from_snowman: bool = False
     ttl: float = 0.0
 
@@ -67,6 +70,8 @@ class Snowman:
     base_mass: float
     mid_mass: float
     head_mass: float
+    vx: float = 0.0
+    vy: float = 0.0
     held: bool = False
     resting: str | None = None
     sign_text: str = ""
@@ -77,6 +82,9 @@ class Snowman:
     was_near: bool = False
     idle_throw_cd: float = 0.0
     idle_throw: bool = False
+    # Сколько ещё стоять и сколько осталось до полного осыпания.
+    life: float = 240.0
+    crumble: float = 0.0
 
     PERFORM_DURATION = 1.35
     STACK_END = 0.60
@@ -787,7 +795,6 @@ class Simulator:
             if i in remove:
                 continue
 
-            # Брошенный снеговиком снежок живёт недолго и не идёт в постройку.
             if ball.ttl > 0.0:
                 ball.ttl -= dt
                 if ball.ttl <= 0.0:
@@ -821,7 +828,7 @@ class Simulator:
             ball.spun += math.hypot(ball.vx, ball.vy) * dt * 0.01
 
             # Попадание на уже лежащий снежок — ложимся сверху.
-            if ball.vy > 0 and not ball.from_snowman:
+            if ball.vy > 0:
                 landed_on = None
                 for other in self.balls:
                     if other is ball or other.held:
@@ -907,9 +914,6 @@ class Simulator:
     # ------------------------------------------------------------------ #
     def _stack_ball(self, ball: Snowball) -> None:
         """Снежок приземлился: положить его на снежок, который уже лежит рядом."""
-        if ball.from_snowman:
-            # Такие снежки только тают, снеговиков из них не лепим.
-            return
         base = None
         best_dx = None
         for other in self.balls:
@@ -973,6 +977,7 @@ class Simulator:
         head_mass = min(masses) * 0.6
         man = Snowman(bottom.x, bottom.y, base_mass, mid_mass, head_mass)
         man.resting = bottom.resting
+        man.life = random.uniform(SNOWMAN_LIFE_MIN, SNOWMAN_LIFE_MAX)
         self.snowmen.append(man)
         self.balls = [b for b in self.balls if b not in chain]
         for b in self.balls:
@@ -1039,6 +1044,7 @@ class Simulator:
         man.perform_cd = 3.0
         man.was_near = True
         man.idle_throw_cd = random.uniform(5.0, 10.0)
+        man.life = random.uniform(SNOWMAN_LIFE_MIN, SNOWMAN_LIFE_MAX)
         self.snowmen.append(man)
         return man
 
@@ -1079,11 +1085,25 @@ class Simulator:
         for man in list(self.snowmen):
             base_r = man.base_r
 
+            # Осыпается: сначала тает на месте, потом разлетается снегом.
+            if man.crumble > 0.0:
+                man.crumble -= dt
+                if man.crumble <= 0.0:
+                    self._crumble_snowman(man)
+                continue
+
             if man.held:
                 man.x = self.mouse_x
                 man.y = self.mouse_y + base_r * 0.9
                 man.vx = 0.0
                 man.vy = 0.0
+                continue
+
+            man.life -= dt
+            if man.life <= 0.0:
+                man.crumble = CRUMBLE_TIME
+                man.perform_t = 0.0
+                man.throw_released = False
                 continue
 
             man.perform_cd = max(0.0, man.perform_cd - dt)
@@ -1154,6 +1174,28 @@ class Simulator:
                 man.resting = bar.id
                 man.perform_cd = 2.0
 
+    def _crumble_snowman(self, man: Snowman) -> None:
+        """Снеговик рассыпался: облачко снежинок и сугроб на месте фигурки."""
+        for _ in range(30):
+            x = man.x + random.uniform(-man.base_r, man.base_r)
+            y = man.y - random.uniform(-man.base_r * 0.4, man.base_r * 2.6)
+            self.field.spawn([x], [y], self.intensity, self.wind * 0.3)
+            index = self.field.count - 1
+            if 0 <= index < self.field.count:
+                self.field.vx[index] = random.uniform(-90.0, 90.0)
+                self.field.vy[index] = random.uniform(-50.0, 70.0)
+                self.field.size[index] = random.uniform(1.6, 3.6)
+
+        if man.resting is not None:
+            ledge, surface = self._ledge_by_id(man.resting)
+            if surface is not None and ledge is not None:
+                local = max(0.0, min(ledge.width, man.x - ledge.x))
+                surface.deposit_collapse_pile(local, 9.0,
+                                              max(24.0, man.base_r * 0.9))
+
+        if man in self.snowmen:
+            self.snowmen.remove(man)
+
     def _snowman_throw(self, man: Snowman, idle: bool = False) -> None:
         tx, ty = man.arm_tip(man.throw_side < 0)
         if idle:
@@ -1166,9 +1208,11 @@ class Simulator:
         dy = target_y - ty
         dist = max(1.0, math.hypot(dx, dy))
         speed = 900.0
+        # Снежки снеговика — обычный строительный материал: ферма продолжается.
+        # Живут 2.5 минуты, чтобы двор не зарастал снежками.
         ball = Snowball(tx, ty, dx / dist * speed, dy / dist * speed - 160.0, 16.0)
         ball.from_snowman = True
-        ball.ttl = THROWN_BALL_TTL
+        ball.ttl = 150.0
         if len(self.balls) < MAX_BALLS:
             self.balls.append(ball)
 
@@ -1211,10 +1255,9 @@ class Simulator:
         self.melting = 2.2
 
     def clear_snowmen(self) -> None:
-        """Убрать всех снеговиков и их снежки."""
+        """Убрать всех снеговиков."""
         self.snowmen.clear()
         self.held_snowman = None
-        self.balls = [b for b in self.balls if not b.from_snowman]
 
     def snowman_count(self) -> int:
         return len(self.snowmen)
