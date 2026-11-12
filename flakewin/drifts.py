@@ -18,7 +18,8 @@ class Surface:
     """Карта высот сугроба вдоль верхней кромки."""
 
     __slots__ = ("ledge_id", "x", "top", "width", "z", "is_taskbar",
-                 "cell", "h", "_dist", "_corner_scale", "dirty")
+                 "cell", "h", "_dist", "_corner_scale", "dirty",
+                 "relax_enabled")
 
     def __init__(self, ledge_id: str, x: float, top: float, width: float,
                  z: int, is_taskbar: bool = False) -> None:
@@ -30,6 +31,8 @@ class Surface:
         self.is_taskbar = is_taskbar
         self.cell = CELL
         self.dirty = True
+        # Пока паровозик чистит полосу, снег не должен сползать обратно.
+        self.relax_enabled = True
         count = max(4, int(np.ceil(width / CELL)))
         self.h = np.zeros(count, dtype=np.float32)
         self._rebuild_cache()
@@ -122,6 +125,8 @@ class Surface:
 
     # ------------------------------------------------------------------ #
     def relax(self, iterations: int = 1) -> None:
+        if not self.relax_enabled:
+            return
         h = self.h
         if h.size < 3:
             return
@@ -358,6 +363,23 @@ class Surface:
         self.dirty = True
 
     # ------------------------------------------------------------------ #
+    def clear_range(self, left_local: float, right_local: float,
+                    fraction: float = 0.92) -> float:
+        """Счистить снег в полосе (без сползания). Возвращает снятый объём."""
+        h = self.h
+        if h.size == 0:
+            return 0.0
+        lo = max(0, int(left_local / self.cell))
+        hi = min(h.size - 1, int(right_local / self.cell))
+        if hi < lo:
+            return 0.0
+        band = h[lo:hi + 1]
+        taken = float(band.sum()) * fraction
+        band *= (1.0 - fraction)
+        band[band < 0.05] = 0.0
+        self.dirty = True
+        return taken
+
     def melt(self, dt: float, rate: float = 26.0) -> None:
         """Постепенное таяние (пункты меню «Растаять»)."""
         if self.h.size == 0:

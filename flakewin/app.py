@@ -198,6 +198,21 @@ class FlakeApp:
         act.triggered.connect(lambda: self._apply_wallpaper("night"))
         act = wallpaper_menu.addAction("Морозное утро")
         act.triggered.connect(lambda: self._apply_wallpaper("frost"))
+
+        customs = self._custom_wallpapers()
+        if customs:
+            custom_menu = wallpaper_menu.addMenu(f"Мои обои ({len(customs)})")
+            for path in customs[:24]:
+                item = custom_menu.addAction(path.stem[:48])
+                item.triggered.connect(
+                    lambda _c=False, chosen=path: self._apply_custom(chosen)
+                )
+
+        wallpaper_menu.addSeparator()
+        act = wallpaper_menu.addAction("Добавить из файла…")
+        act.triggered.connect(self._import_wallpaper)
+        act = wallpaper_menu.addAction("Открыть папку обоев")
+        act.triggered.connect(self._open_wallpaper_folder)
         wallpaper_menu.addSeparator()
         act = wallpaper_menu.addAction("Вернуть прежние")
         act.triggered.connect(self._restore_wallpaper)
@@ -301,6 +316,53 @@ class FlakeApp:
             self._toast("Прежние обои вернулись")
         else:
             self._toast("Прежние обои не сохранены")
+
+    # ------------------------------------------------------------------ #
+    def _custom_wallpapers(self):
+        try:
+            from .wallpaper import custom_wallpapers
+
+            return custom_wallpapers()
+        except Exception:
+            return []
+
+    def _apply_custom(self, path) -> None:
+        from .wallpaper import apply_image
+
+        if apply_image(path, self.settings):
+            self._toast(f"Обои: {path.stem}")
+        else:
+            self._toast("Не удалось поставить обои")
+
+    def _import_wallpaper(self) -> None:
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QFileDialog
+
+        from .wallpaper import import_wallpaper
+
+        chosen, _ = QFileDialog.getOpenFileName(
+            None,
+            "Картинка для обоев",
+            str(Path.home()),
+            "Картинки (*.jpg *.jpeg *.png *.bmp *.webp)",
+        )
+        if not chosen:
+            return
+        target = import_wallpaper(chosen)
+        if target is None:
+            self._toast("Не удалось добавить картинку")
+            return
+        self._apply_custom(target)
+
+    def _open_wallpaper_folder(self) -> None:
+        from .wallpaper import CUSTOM_DIR
+
+        CUSTOM_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            os.startfile(str(CUSTOM_DIR))
+        except OSError:
+            self._toast("Не удалось открыть папку")
 
     def _ask_sign(self, man: Snowman) -> None:
         text, ok = QInputDialog.getText(
