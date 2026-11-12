@@ -111,31 +111,28 @@ def main() -> int:
     print(f"через 40 с: на месте={alive} resting={man.resting}"
           f" бросков={throws} снежков={len(sim.balls)}")
 
-    # --- снеговики размножаются, но у каждого есть срок жизни ---
-    print("--- снеговик-ферма и срок жизни ---")
+    # --- самоподдержание: шеф не тает, а его снеговики живут по таймеру ---
+    print("--- ферма: старт с одного снеговика ---")
     sim.snowmen.clear()
     sim.balls.clear()
     sim.mouse_x, sim.mouse_y = 20.0, 20.0
-    placed = 0
-    for i in range(6):
-        if sim.place_snowman(300.0 + i * 120.0, 150.0) is not None:
-            placed += 1
-    print(f"поставлено вручную: {placed} (потолок {MAX_SNOWMEN})")
-    peak = placed
-    prev = placed
-    crumbled = False
-    for _ in range(30 * 400):
+    boss = sim.place_snowman(600.0, 150.0)
+    born = 0
+    peak = 1
+    prev = 1
+    for _ in range(30 * 900):
         sim.snapshot = Snapshot(ledges=ledges, occluders=occluders, blocked=[],
                                 foreground=0, signature=())
         sim._update_snowmen(dt)
         sim._update_balls(dt)
         count = len(sim.snowmen)
+        if count > prev:
+            born += count - prev
         peak = max(peak, count)
-        if count < prev:
-            crumbled = True
         prev = count
-    print(f"через 400 с: снеговиков={len(sim.snowmen)} максимум={peak}"
-          f" осыпались={crumbled}")
+    print(f"через 900 с: шеф на месте={boss in sim.snowmen} boss={boss.boss}"
+          f" всего={len(sim.snowmen)} родилось={born} пик={peak}"
+          f" снежков={len(sim.balls)}")
 
     # --- паровозик ---
     print("--- паровозик ---")

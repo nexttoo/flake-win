@@ -19,8 +19,8 @@ BALL_MAX_MASS = 4000.0
 BALL_VISUAL_MAX_RADIUS = 420.0
 MAX_BALLS = 24
 BALL_SPAWN_THRESHOLD = 11.0
-# Снеговики размножаются сами — это забавно, но у каждого есть срок жизни.
-MAX_SNOWMEN = 12
+# Снеговики размножаются сами — это забавно, но у каждого (кроме шефа) есть срок жизни.
+MAX_SNOWMEN = 8
 # Через сколько снеговик рассыпается в снег (секунды).
 SNOWMAN_LIFE_MIN = 180.0
 SNOWMAN_LIFE_MAX = 300.0
@@ -85,6 +85,8 @@ class Snowman:
     # Сколько ещё стоять и сколько осталось до полного осыпания.
     life: float = 240.0
     crumble: float = 0.0
+    # Главный снеговик (поставлен вручную) не тает никогда.
+    boss: bool = False
 
     PERFORM_DURATION = 1.35
     STACK_END = 0.60
@@ -913,20 +915,20 @@ class Simulator:
     #  Укладка снежков и рождение снеговика
     # ------------------------------------------------------------------ #
     def _stack_ball(self, ball: Snowball) -> None:
-        """Снежок приземлился: положить его на снежок, который уже лежит рядом."""
+        """Снежок приземлился: ставим его на свободный снежок рядом."""
         base = None
-        best_dx = None
+        best_y = None
         for other in self.balls:
             if other is ball or other.held or other.resting != ball.resting:
                 continue
-            # Шар ниже (или на том же уровне) может стать опорой.
-            if other.y < ball.y - 2.0:
+            if abs(other.x - ball.x) > other.radius * 1.3:
                 continue
-            dx = abs(other.x - ball.x)
-            if dx > other.radius * 0.95:
+            # На этот снежок уже кто-то стоит — ищем следующий.
+            if any(b.stacked_on is other for b in self.balls):
                 continue
-            if best_dx is None or dx < best_dx:
-                base, best_dx = other, dx
+            # Берём самый верхний свободный: так стопка растёт вверх.
+            if best_y is None or other.y < best_y:
+                base, best_y = other, other.y
         if base is not None:
             ball.stacked_on = base
             ball.x = base.x
@@ -1015,7 +1017,8 @@ class Simulator:
 
     def place_snowman(self, x: float, y: float) -> Snowman | None:
         """Поставить снеговика на ближайшую кромку (None — если уже полно)."""
-        if len(self.snowmen) >= MAX_SNOWMEN:
+        # Вручную можно поставить чуть больше, чем разрешает ферма.
+        if len(self.snowmen) >= MAX_SNOWMEN + 2:
             return None
         man = Snowman(x, y, 90.0, 50.0, 26.0)
         ledge = self._best_ledge_for(x, y)
@@ -1045,6 +1048,7 @@ class Simulator:
         man.was_near = True
         man.idle_throw_cd = random.uniform(5.0, 10.0)
         man.life = random.uniform(SNOWMAN_LIFE_MIN, SNOWMAN_LIFE_MAX)
+        man.boss = True  # поставлен вручную — шеф не тает
         self.snowmen.append(man)
         return man
 
@@ -1099,12 +1103,13 @@ class Simulator:
                 man.vy = 0.0
                 continue
 
-            man.life -= dt
-            if man.life <= 0.0:
-                man.crumble = CRUMBLE_TIME
-                man.perform_t = 0.0
-                man.throw_released = False
-                continue
+            if not man.boss:
+                man.life -= dt
+                if man.life <= 0.0:
+                    man.crumble = CRUMBLE_TIME
+                    man.perform_t = 0.0
+                    man.throw_released = False
+                    continue
 
             man.perform_cd = max(0.0, man.perform_cd - dt)
 
@@ -1193,14 +1198,44 @@ class Simulator:
                 surface.deposit_collapse_pile(local, 9.0,
                                               max(24.0, man.base_r * 0.9))
 
+            # Остаются снежки — из них можно слепить нового снеговика.
+            if ledge is not None and len(self.balls) < MAX_BALLS - 2:
+                for _ in range(2):
+                    leftover = Snowball(man.x + random.uniform(-16.0, 16.0),
+                                        0.0, 0.0, 0.0, 18.0)
+                    local = max(0.0, min(ledge.width, leftover.x - ledge.x))
+                    pile = surface.height_at(local) if surface is not None else 0.0
+                    leftover.y = ledge.top - pile - leftover.radius
+                    leftover.resting = ledge.id
+                    leftover.from_snowman = True
+                    leftover.ttl = 240.0
+                    self.balls.append(leftover)
+
         if man in self.snowmen:
             self.snowmen.remove(man)
+
+    def _build_target(self, man: Snowman) -> Snowball | None:
+        """Снежок, на который стоит положить следующий (строим нового друга)."""
+        candidates = [b for b in self.balls
+                      if not b.held and b.resting is not None
+                      and abs(b.x - man.x) < 460.0
+                      and (man.resting is None or b.resting == man.resting)]
+        if not candidates:
+            return None
+        # Ближние интереснее — но и совсем рядом не всегда удобно.
+        return random.choice(candidates[:6])
 
     def _snowman_throw(self, man: Snowman, idle: bool = False) -> None:
         tx, ty = man.arm_tip(man.throw_side < 0)
         if idle:
-            target_x = man.x + man.throw_side * random.uniform(240.0, 620.0)
-            target_y = man.mid_y + random.uniform(-80.0, 30.0)
+            # Целимся в уже лежащий снежок рядом — так собирается новый снеговик.
+            target = self._build_target(man)
+            if target is not None:
+                target_x = target.x + random.uniform(-7.0, 7.0)
+                target_y = target.y - target.radius
+            else:
+                target_x = man.x + man.throw_side * random.uniform(240.0, 620.0)
+                target_y = man.mid_y + random.uniform(-80.0, 30.0)
         else:
             target_x = self.mouse_x if self.mouse_x > -9000 else man.x + man.throw_side * 300
             target_y = self.mouse_y if self.mouse_y > -9000 else man.mid_y
