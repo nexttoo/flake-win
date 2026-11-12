@@ -14,6 +14,7 @@ DEFAULTS = {
     "paused": False,
     "hide_on_maximized": False,
     "train_enabled": True,
+    "snowman_scale": 1.55,
     "wallpaper_backup": "",
     "autostart": False,
     "lan_enabled": False,

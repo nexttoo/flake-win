@@ -98,12 +98,14 @@
   "paused": false,
   "hide_on_maximized": false,
   "train_enabled": true,
+  "snowman_scale": 1.55,
   "wallpaper_backup": "",
   "autostart": false,
   "fps_limit": 30
 }
 ```
 
+`snowman_scale` — размер снеговика (1.0 — мелкий, 2.0 — крупный).
 Файл можно править вручную при закрытом приложении.
 
 ## Новогодние обои

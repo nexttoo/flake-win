@@ -74,18 +74,20 @@ class Snowman:
     PERFORM_DURATION = 1.35
     STACK_END = 0.60
     HOP_END = 0.48
+    # Общий масштаб фигурки: на экране 1080p снеговик должен читаться.
+    SCALE = 1.55
 
     @property
     def base_r(self) -> float:
-        return max(13.0, min(26.0, 6.5 + math.sqrt(self.base_mass) * 1.35))
+        return max(13.0, min(26.0, 6.5 + math.sqrt(self.base_mass) * 1.35)) * self.SCALE
 
     @property
     def mid_r(self) -> float:
-        return max(10.0, min(19.0, 5.2 + math.sqrt(self.mid_mass) * 1.1))
+        return max(10.0, min(19.0, 5.2 + math.sqrt(self.mid_mass) * 1.1)) * self.SCALE
 
     @property
     def head_r(self) -> float:
-        return max(7.5, min(13.5, 4.8 + math.sqrt(self.head_mass) * 0.95))
+        return max(7.5, min(13.5, 4.8 + math.sqrt(self.head_mass) * 0.95)) * self.SCALE
 
     @property
     def mid_y(self) -> float:
@@ -988,8 +990,20 @@ class Simulator:
 
     def place_snowman(self, x: float, y: float) -> Snowman:
         """Поставить снеговика на ближайшую кромку (или уронить вниз)."""
-        man = Snowman(x, y, 46.0, 24.0, 13.0)
+        man = Snowman(x, y, 90.0, 50.0, 26.0)
         ledge = self._best_ledge_for(x, y)
+
+        # Фигурке нужно место сверху, иначе голова уйдёт за край экрана.
+        need = (man.top_y - man.y) + 14.0
+        top_limit = self.world.bounds().top()
+        if ledge is not None and (ledge.top - top_limit) < need:
+            lower = [lg for lg in self.snapshot.ledges
+                     if lg.can_accumulate
+                     and (lg.top - top_limit) >= need
+                     and lg.x - 4 <= x <= lg.x + lg.width + 4]
+            if lower:
+                ledge = max(lower, key=lambda lg: lg.top)
+
         if ledge is not None:
             surface = self.surfaces.get(ledge.id)
             local = max(3.0, min(ledge.width - 3.0, x - ledge.x))
@@ -999,7 +1013,7 @@ class Simulator:
             man.vy = 0.0
             man.resting = ledge.id
             if surface is not None:
-                surface.restore_mound(local, 11.0, 28.0)
+                surface.restore_mound(local, 13.0, max(28.0, man.base_r * 0.85))
         man.perform_cd = 3.0
         man.was_near = True
         man.idle_throw_cd = random.uniform(5.0, 10.0)
@@ -1095,7 +1109,8 @@ class Simulator:
                     man.vy = 0.0
                     man.resting = ledge.id
                     if surface is not None:
-                        surface.restore_mound(man.x - ledge.x, 11.0, 28.0)
+                        surface.restore_mound(man.x - ledge.x, 13.0,
+                                              max(28.0, base_r * 0.85))
                     landed = True
                     break
             if landed:

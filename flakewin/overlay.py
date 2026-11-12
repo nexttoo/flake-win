@@ -84,6 +84,12 @@ class OverlayEngine(QObject):
         self.tracker.hide_maximized = bool(settings["hide_on_maximized"])
         self.sim = Simulator(self.world, self.tracker, settings)
         self.sim.train_runner.enabled = bool(settings["train_enabled"])
+        try:
+            from .sim import Snowman
+
+            Snowman.SCALE = max(0.6, min(3.0, float(settings["snowman_scale"])))
+        except Exception:
+            pass
         self.renderer = Renderer()
 
         self.overlays: list[SnowOverlay] = []

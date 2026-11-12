@@ -144,9 +144,9 @@ def run_selftest(out_path: str, width: int = 1600, height: int = 900) -> int:
     for _ in range(2):
         sim._integrate(1.0 / 60.0)
 
-    # Снеговик на среднем окне и пара снежков.
-    name, x, y, w, h = WINDOWS[1]
-    man = sim.place_snowman(x + w * 0.34, y - 8)
+    # Снеговик на окне и пара снежков.
+    name, x, y, w, h = WINDOWS[2]
+    man = sim.place_snowman(x + w * 0.62, y - 8)
     man.sign_text = "Привет!"
 
     name2, x2, y2, w2, h2 = WINDOWS[0]
