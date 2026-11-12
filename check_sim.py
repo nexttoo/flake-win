@@ -9,7 +9,7 @@ from PySide6.QtCore import QRect
 from PySide6.QtWidgets import QApplication
 
 from flakewin.settings import Settings
-from flakewin.sim import Simulator, Snowball, Snowman
+from flakewin.sim import MAX_SNOWMEN, Simulator, Snowball, Snowman
 from flakewin.tracker import Ledge, Occluder, Snapshot, WindowTracker
 from flakewin.world import Screen, World
 
@@ -110,6 +110,24 @@ def main() -> int:
     alive = man in sim.snowmen
     print(f"через 40 с: на месте={alive} resting={man.resting}"
           f" бросков={throws} снежков={len(sim.balls)}")
+
+    # --- снеговики не должны размножаться сами ---
+    print("--- снеговик-ферма ---")
+    sim.snowmen.clear()
+    sim.balls.clear()
+    sim.mouse_x, sim.mouse_y = 20.0, 20.0
+    placed = 0
+    for i in range(6):
+        if sim.place_snowman(300.0 + i * 120.0, 150.0) is not None:
+            placed += 1
+    print(f"поставлено вручную: {placed} (лимит {MAX_SNOWMEN})")
+    for _ in range(30 * 60):
+        sim.snapshot = Snapshot(ledges=ledges, occluders=occluders, blocked=[],
+                                foreground=0, signature=())
+        sim._update_snowmen(dt)
+        sim._update_balls(dt)
+    print(f"через 60 с: снеговиков={len(sim.snowmen)}"
+          f" снежков={len(sim.balls)}")
 
     # --- паровозик ---
     print("--- паровозик ---")

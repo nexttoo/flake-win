@@ -19,6 +19,10 @@ BALL_MAX_MASS = 4000.0
 BALL_VISUAL_MAX_RADIUS = 420.0
 MAX_BALLS = 24
 BALL_SPAWN_THRESHOLD = 11.0
+# Больше четырёх снеговиков на столе — уже нашествие.
+MAX_SNOWMEN = 4
+# Сколько живёт снежок, брошенный снеговиком (потом тает).
+THROWN_BALL_TTL = 9.0
 
 
 # --------------------------------------------------------------------------- #
@@ -36,6 +40,9 @@ class Snowball:
     stacked_on: "Snowball | None" = None
     resting: str | None = None
     spun: float = 0.0
+    # Снежок, брошенный снеговиком: не годится как строительный материал и тает.
+    from_snowman: bool = False
+    ttl: float = 0.0
 
     @property
     def radius(self) -> float:
@@ -779,6 +786,14 @@ class Simulator:
         for i, ball in enumerate(self.balls):
             if i in remove:
                 continue
+
+            # Брошенный снеговиком снежок живёт недолго и не идёт в постройку.
+            if ball.ttl > 0.0:
+                ball.ttl -= dt
+                if ball.ttl <= 0.0:
+                    remove.add(i)
+                    continue
+
             if ball.held:
                 ball.x = self.mouse_x
                 ball.y = self.mouse_y
@@ -806,7 +821,7 @@ class Simulator:
             ball.spun += math.hypot(ball.vx, ball.vy) * dt * 0.01
 
             # Попадание на уже лежащий снежок — ложимся сверху.
-            if ball.vy > 0:
+            if ball.vy > 0 and not ball.from_snowman:
                 landed_on = None
                 for other in self.balls:
                     if other is ball or other.held:
@@ -892,6 +907,9 @@ class Simulator:
     # ------------------------------------------------------------------ #
     def _stack_ball(self, ball: Snowball) -> None:
         """Снежок приземлился: положить его на снежок, который уже лежит рядом."""
+        if ball.from_snowman:
+            # Такие снежки только тают, снеговиков из них не лепим.
+            return
         base = None
         best_dx = None
         for other in self.balls:
@@ -946,6 +964,8 @@ class Simulator:
         return chain
 
     def _promote_snowman(self, chain: list[Snowball]) -> None:
+        if len(self.snowmen) >= MAX_SNOWMEN:
+            return
         masses = [b.mass for b in chain]
         bottom = chain[0]
         base_mass = max(masses) * 1.15
@@ -988,8 +1008,10 @@ class Simulator:
                 best, best_score = ledge, score
         return best
 
-    def place_snowman(self, x: float, y: float) -> Snowman:
-        """Поставить снеговика на ближайшую кромку (или уронить вниз)."""
+    def place_snowman(self, x: float, y: float) -> Snowman | None:
+        """Поставить снеговика на ближайшую кромку (None — если уже полно)."""
+        if len(self.snowmen) >= MAX_SNOWMEN:
+            return None
         man = Snowman(x, y, 90.0, 50.0, 26.0)
         ledge = self._best_ledge_for(x, y)
 
@@ -1145,6 +1167,8 @@ class Simulator:
         dist = max(1.0, math.hypot(dx, dy))
         speed = 900.0
         ball = Snowball(tx, ty, dx / dist * speed, dy / dist * speed - 160.0, 16.0)
+        ball.from_snowman = True
+        ball.ttl = THROWN_BALL_TTL
         if len(self.balls) < MAX_BALLS:
             self.balls.append(ball)
 
@@ -1185,6 +1209,12 @@ class Simulator:
 
     def melt(self) -> None:
         self.melting = 2.2
+
+    def clear_snowmen(self) -> None:
+        """Убрать всех снеговиков и их снежки."""
+        self.snowmen.clear()
+        self.held_snowman = None
+        self.balls = [b for b in self.balls if not b.from_snowman]
 
     def snowman_count(self) -> int:
         return len(self.snowmen)

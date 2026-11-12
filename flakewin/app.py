@@ -185,6 +185,9 @@ class FlakeApp:
         act = menu.addAction("Снеговик (поставить)")
         act.triggered.connect(self._spawn_snowman)
 
+        act = menu.addAction("Убрать снеговиков")
+        act.triggered.connect(self._clear_snowmen)
+
         train_menu = menu.addMenu("Паровозик")
         act = train_menu.addAction("Пустить сейчас")
         act.triggered.connect(self._summon_train)
@@ -281,8 +284,17 @@ class FlakeApp:
             y = bounds.center().y()
 
         man = sim.place_snowman(x, y)
+        if man is None:
+            from .sim import MAX_SNOWMEN
+
+            self._toast(f"Уже {MAX_SNOWMEN} снеговика — больше не помещается")
+            return
         state = "на окне" if man.resting else "падает на кромку"
         self._toast(f"Снеговик поставлен ({state}) — иногда кидает снежки")
+
+    def _clear_snowmen(self) -> None:
+        self.sim.clear_snowmen()
+        self._toast("Снеговики убраны")
 
     def _summon_train(self) -> None:
         self.sim.train_runner.summon()
