@@ -134,6 +134,18 @@ def main() -> int:
           f" всего={len(sim.snowmen)} родилось={born} пик={peak}"
           f" снежков={len(sim.balls)}")
 
+    positions = sorted((round(m.x), round(m.y), m.resting) for m in sim.snowmen)
+    overlaps = 0
+    for i in range(len(sim.snowmen)):
+        for j in range(i + 1, len(sim.snowmen)):
+            a, b = sim.snowmen[i], sim.snowmen[j]
+            if a.resting != b.resting:
+                continue
+            if abs(a.x - b.x) < min(a.base_r, b.base_r) * 1.4:
+                overlaps += 1
+    print(f"позиции={positions}")
+    print(f"перекрытий на одной кромке={overlaps}")
+
     # --- паровозик ---
     print("--- паровозик ---")
     sim.train_runner.enabled = True

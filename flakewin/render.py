@@ -388,6 +388,12 @@ class Renderer:
             alpha = max(0.0, min(1.0, man.crumble / CRUMBLE_TIME))
             p.setOpacity(alpha)
             p.translate(0.0, (1.0 - alpha) * 9.0)
+        if man.walk_amp > 0.01:
+            # Идёт вразвалочку — качается вокруг точки опоры.
+            foot_y = man.y + man.base_r * 0.75
+            p.translate(man.x, foot_y)
+            p.rotate(math.sin(man.walk_phase) * 6.5 * man.walk_amp)
+            p.translate(-man.x, -foot_y)
         bx, by = man.pose_base
         mx, my = man.pose_mid
         hx, hy = man.pose_head

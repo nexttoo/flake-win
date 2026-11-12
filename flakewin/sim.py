@@ -87,6 +87,11 @@ class Snowman:
     crumble: float = 0.0
     # Главный снеговик (поставлен вручную) не тает никогда.
     boss: bool = False
+    # Идёт в развалочку к свободному месту.
+    walk_to: float | None = None
+    walk_phase: float = 0.0
+    walk_amp: float = 0.0
+    walk_cd: float = 0.0
 
     PERFORM_DURATION = 1.35
     STACK_END = 0.60
@@ -981,6 +986,7 @@ class Simulator:
         man.resting = bottom.resting
         man.life = random.uniform(SNOWMAN_LIFE_MIN, SNOWMAN_LIFE_MAX)
         self.snowmen.append(man)
+        self._pick_walk_target(man)
         self.balls = [b for b in self.balls if b not in chain]
         for b in self.balls:
             if b.stacked_on is not None and b.stacked_on in chain:
@@ -1059,6 +1065,78 @@ class Simulator:
                 return man
         return None
 
+    def _pick_walk_target(self, man: Snowman) -> None:
+        """Свободное место на кромке: туда снеговик пойдёт в развалочку."""
+        if man.resting is None:
+            return
+        ledge, _ = self._ledge_by_id(man.resting)
+        if ledge is None or ledge.width < man.base_r * 4:
+            return
+        gap = max(man.base_r * 2.2, 70.0)
+        neighbours = [o for o in self.snowmen if o is not man]
+        # Чужие места и чужие цели — обе заняты.
+        occupied: list[float] = []
+        for other in neighbours:
+            occupied.append(other.x)
+            if other.walk_to is not None:
+                occupied.append(other.walk_to)
+
+        if all(abs(man.x - x) >= gap for x in occupied):
+            return
+
+        direction = 1.0 if random.random() < 0.5 else -1.0
+        left_limit = ledge.x + man.base_r + 6.0
+        right_limit = ledge.x + ledge.width - man.base_r - 6.0
+        for distance in range(28, 360, 14):
+            for sign in (direction, -direction):
+                x = man.x + sign * distance
+                if x < left_limit or x > right_limit:
+                    continue
+                if any(abs(x - occupied_x) < gap for occupied_x in occupied):
+                    continue
+                man.walk_to = x
+                man.walk_phase = random.uniform(0.0, 6.28)
+                return
+
+    def _walk_step(self, man: Snowman, ledge, dt: float) -> None:
+        """Шаг вразвалочку: покачивание и перевалка с боку на бок."""
+        if man.boss:
+            # Шеф стоит там, куда его поставили.
+            man.walk_amp = max(0.0, man.walk_amp - dt * 4.0)
+            return
+
+        if man.walk_to is None:
+            man.walk_amp = max(0.0, man.walk_amp - dt * 2.5)
+            # Если сосед притёрся — отойти ещё раз.
+            man.walk_cd = max(0.0, man.walk_cd - dt)
+            if man.walk_cd <= 0.0:
+                man.walk_cd = 2.5
+                self._pick_walk_target(man)
+            return
+
+        # Кто-то занял наше место — ищем другое.
+        if any(other is not man and abs(other.x - man.walk_to) < man.base_r * 1.2
+               for other in self.snowmen):
+            man.walk_to = None
+            self._pick_walk_target(man)
+            return
+
+        left = ledge.x + man.base_r + 4.0
+        right = ledge.x + ledge.width - man.base_r - 4.0
+        if man.walk_to < left or man.walk_to > right:
+            man.walk_to = None
+            return
+
+        step = 34.0 * dt
+        delta = man.walk_to - man.x
+        if abs(delta) <= step:
+            man.x = man.walk_to
+            man.walk_to = None
+        else:
+            man.x += math.copysign(step, delta)
+        man.walk_phase += dt * 7.5
+        man.walk_amp = min(1.0, man.walk_amp + dt * 3.5)
+
     def _snowman_idle(self, man: Snowman, dt: float) -> None:
         """Реакция на наведение и собственные броски раз в несколько секунд."""
         d = math.hypot(self.mouse_x - man.x,
@@ -1136,6 +1214,7 @@ class Simulator:
                     pile = surface.height_at(local) if surface else 0.0
                     man.y = ledge.top - pile - base_r * 0.75
                     man.vy = 0.0
+                    self._walk_step(man, ledge, dt)
                     self._snowman_idle(man, dt)
                     continue
 
