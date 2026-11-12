@@ -20,6 +20,13 @@ WALLPAPER_DIR = APP_DIR / "wallpaper"
 CUSTOM_DIR = WALLPAPER_DIR / "custom"
 SUPPORTED = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
+# Готовые обои, которые поставляются вместе с приложением.
+ASSETS_DIR = Path(__file__).resolve().parent / "assets" / "wallpapers"
+BUNDLED = (
+    ("Зимняя ночь", "winter-night.jpg"),
+    ("Зимнее утро", "winter-morning.jpg"),
+)
+
 PALETTES = {
     "night": {
         "sky": [(0.00, "#040a16"), (0.26, "#081a30"), (0.50, "#102a45"),
@@ -673,6 +680,31 @@ def restore_wallpaper(settings) -> bool:
 # --------------------------------------------------------------------------- #
 #  Свои картинки
 # --------------------------------------------------------------------------- #
+
+def bundled_wallpapers() -> list[tuple[str, str]]:
+    """Обои в комплекте: (подпись, имя файла)."""
+    return [(label, name) for label, name in BUNDLED
+            if (ASSETS_DIR / name).is_file()]
+
+
+def apply_bundled(name: str, settings) -> str | None:
+    """Поставить встроенную обоину. Файл копируется в %APPDATA%, чтобы
+    после закрытия приложения Windows не потеряла картинку из temp."""
+    source = ASSETS_DIR / name
+    if not source.is_file():
+        return None
+    try:
+        import shutil
+
+        WALLPAPER_DIR.mkdir(parents=True, exist_ok=True)
+        target = WALLPAPER_DIR / name
+        if (not target.exists()
+                or target.stat().st_size != source.stat().st_size):
+            shutil.copy2(source, target)
+    except OSError:
+        return None
+    return str(target) if apply_image(target, settings) else None
+
 
 def custom_wallpapers() -> list[Path]:
     """Картинки, которые пользователь положил в папку обоев."""

@@ -182,7 +182,7 @@ def run_selftest(out_path: str, width: int = 1600, height: int = 900) -> int:
     try:
         from pathlib import Path
 
-        from .wallpaper import render_wallpaper
+        from .wallpaper import ASSETS_DIR, bundled_wallpapers, render_wallpaper
 
         base = Path(out_path)
         for variant in ("night", "frost"):
@@ -190,6 +190,17 @@ def run_selftest(out_path: str, width: int = 1600, height: int = 900) -> int:
             wall_path = base.with_name(f"{base.stem}-wallpaper-{variant}.png")
             wall_ok = wall.save(str(wall_path), "PNG")
             print(f"wallpaper {variant}: {wall_path} -> {wall_ok}")
+
+        # Встроенные фотографии обоев должны попасть в сборку.
+        bundled = bundled_wallpapers()
+        print(f"bundled wallpapers: {len(bundled)} из {ASSETS_DIR}")
+        for label, name in bundled:
+            probe = QImage(str(ASSETS_DIR / name))
+            print(f"  {label}: {name} -> {probe.width()}x{probe.height()}")
+            if probe.isNull():
+                return 1
+        if not bundled:
+            return 1
     except Exception as error:  # noqa: BLE001
         print(f"wallpaper selftest failed: {error}")
         return 1

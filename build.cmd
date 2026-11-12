@@ -18,6 +18,7 @@ if errorlevel 1 goto :fail
 echo [4/4] Сборка FlakeWin.exe...
 python -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name FlakeWin --icon flake.ico ^
+  --add-data "flakewin\assets;flakewin\assets" ^
   --exclude-module tkinter --exclude-module unittest --exclude-module pydoc_data ^
   --exclude-module PySide6.QtQml --exclude-module PySide6.QtQuick ^
   --exclude-module PySide6.QtNetwork --exclude-module PySide6.QtOpenGL ^

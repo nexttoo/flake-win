@@ -194,9 +194,15 @@ class FlakeApp:
         act.triggered.connect(self._toggle_train)
 
         wallpaper_menu = menu.addMenu("Новогодние обои")
-        act = wallpaper_menu.addAction("Ночная зима")
+        for label, name in self._bundled_wallpapers():
+            item = wallpaper_menu.addAction(label)
+            item.triggered.connect(
+                lambda _c=False, asset=name, title=label: self._apply_bundled(asset, title)
+            )
+        wallpaper_menu.addSeparator()
+        act = wallpaper_menu.addAction("Ночная зима (рисованная)")
         act.triggered.connect(lambda: self._apply_wallpaper("night"))
-        act = wallpaper_menu.addAction("Морозное утро")
+        act = wallpaper_menu.addAction("Морозное утро (рисованное)")
         act.triggered.connect(lambda: self._apply_wallpaper("frost"))
 
         customs = self._custom_wallpapers()
@@ -318,6 +324,22 @@ class FlakeApp:
             self._toast("Прежние обои не сохранены")
 
     # ------------------------------------------------------------------ #
+    def _bundled_wallpapers(self):
+        try:
+            from .wallpaper import bundled_wallpapers
+
+            return bundled_wallpapers()
+        except Exception:
+            return []
+
+    def _apply_bundled(self, name: str, label: str) -> None:
+        from .wallpaper import apply_bundled
+
+        if apply_bundled(name, self.settings):
+            self._toast(f"Обои: {label}")
+        else:
+            self._toast("Не удалось поставить обои")
+
     def _custom_wallpapers(self):
         try:
             from .wallpaper import custom_wallpapers
