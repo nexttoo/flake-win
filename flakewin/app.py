@@ -195,6 +195,19 @@ class FlakeApp:
         act.setCheckable(True)
         act.setChecked(bool(sim.train_runner.enabled))
         act.triggered.connect(self._toggle_train)
+        train_menu.addSeparator()
+        act = train_menu.addAction("Музыка под уборку")
+        act.setCheckable(True)
+        act.setChecked(bool(self.settings["music_enabled"]))
+        act.triggered.connect(lambda checked: self._toggle_music(checked))
+        volume_menu = train_menu.addMenu("Громкость музыки")
+        for label, value in (("Тихо", 30), ("Средне", 60), ("Громко", 90)):
+            item = volume_menu.addAction(label)
+            item.setCheckable(True)
+            item.setChecked(int(self.settings["music_volume"]) == value)
+            item.triggered.connect(
+                lambda _c=False, v=value: self._set_music_volume(v)
+            )
 
         wallpaper_menu = menu.addMenu("Новогодние обои")
         for label, name in self._bundled_wallpapers():
@@ -306,6 +319,15 @@ class FlakeApp:
         self.settings["train_enabled"] = enabled
         if enabled:
             self.sim.train_runner.cooldown = min(self.sim.train_runner.cooldown, 8.0)
+
+    def _toggle_music(self, checked: bool) -> None:
+        self.engine.set_music_enabled(bool(checked))
+        self._toast("Музыка под уборку включена" if checked
+                    else "Музыка под уборку выключена")
+
+    def _set_music_volume(self, value: int) -> None:
+        self.engine.set_music_volume(value)
+        self._toast(f"Громкость музыки: {value}%")
 
     def _apply_wallpaper(self, variant: str) -> None:
         from PySide6.QtGui import QGuiApplication

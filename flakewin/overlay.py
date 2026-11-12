@@ -10,6 +10,7 @@ from PySide6.QtGui import QGuiApplication, QPainter
 from PySide6.QtWidgets import QWidget
 
 from . import winapi
+from .audio import TrainMusic
 from .render import Renderer
 from .settings import Settings
 from .sim import Simulator
@@ -91,6 +92,10 @@ class OverlayEngine(QObject):
         except Exception:
             pass
         self.renderer = Renderer()
+        self.music = TrainMusic(
+            volume=int(settings["music_volume"]),
+            enabled=bool(settings["music_enabled"]),
+        )
 
         self.overlays: list[SnowOverlay] = []
         self._fps = int(settings["fps_limit"] or 30)
@@ -129,6 +134,10 @@ class OverlayEngine(QObject):
 
     def stop(self) -> None:
         self.timer.stop()
+        try:
+            self.music.close()
+        except Exception:
+            pass
         for overlay in self.overlays:
             overlay.hide()
             overlay.deleteLater()
@@ -161,6 +170,14 @@ class OverlayEngine(QObject):
     def set_mouse_enabled(self, value: bool) -> None:
         self.settings["mouse_enabled"] = value
         self.sim.mouse_enabled = value
+
+    def set_music_enabled(self, value: bool) -> None:
+        self.settings["music_enabled"] = bool(value)
+        self.music.set_enabled(bool(value))
+
+    def set_music_volume(self, value: int) -> None:
+        self.settings["music_volume"] = int(value)
+        self.music.set_volume(int(value))
 
     def set_hide_maximized(self, value: bool) -> None:
         self.settings["hide_on_maximized"] = bool(value)
@@ -195,6 +212,13 @@ class OverlayEngine(QObject):
 
         self._sample_pointer(now, dt)
         self.sim.update(dt, active=self._mouse_move_age < 0.35)
+
+        # Музыка едет вместе с паровозиком: выехал — появляется, уехал — стихает.
+        if self.sim.train_runner.train is not None and not self.sim.paused:
+            self.music.start()
+        else:
+            self.music.stop()
+        self.music.update(dt)
 
         for overlay in self.overlays:
             overlay.update()

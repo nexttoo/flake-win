@@ -14,6 +14,8 @@ DEFAULTS = {
     "paused": False,
     "hide_on_maximized": False,
     "train_enabled": True,
+    "music_enabled": True,
+    "music_volume": 60,
     "snowman_scale": 1.55,
     "wallpaper_backup": "",
     "autostart": False,

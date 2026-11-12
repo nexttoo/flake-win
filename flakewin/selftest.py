@@ -201,6 +201,14 @@ def run_selftest(out_path: str, width: int = 1600, height: int = 900) -> int:
                 return 1
         if not bundled:
             return 1
+
+        # Мелодия паровозика должна лежать в сборке.
+        from .audio import music_file
+
+        tune = music_file()
+        print(f"melody: {tune}")
+        if tune is None or tune.stat().st_size < 100_000:
+            return 1
     except Exception as error:  # noqa: BLE001
         print(f"wallpaper selftest failed: {error}")
         return 1
