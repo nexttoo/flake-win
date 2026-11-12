@@ -286,3 +286,34 @@ def key_down(vk: int) -> bool:
 
 def foreground_window() -> int:
     return int(user32.GetForegroundWindow() or 0)
+
+
+# --------------------------------------------------------------------------- #
+#  Обои рабочего стола
+# --------------------------------------------------------------------------- #
+
+SPI_SETDESKWALLPAPER = 0x0014
+SPIF_UPDATEINIFILE = 0x01
+SPIF_SENDCHANGE = 0x02
+
+_proto(user32.SystemParametersInfoW, wt.BOOL, wt.UINT, wt.UINT,
+       wt.LPCWSTR, wt.UINT)
+
+
+def set_wallpaper(path: str) -> bool:
+    try:
+        return bool(user32.SystemParametersInfoW(
+            SPI_SETDESKWALLPAPER, 0, path, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE
+        ))
+    except Exception:
+        return False
+
+
+def current_wallpaper() -> str:
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Desktop") as key:
+            value, _ = winreg.QueryValueEx(key, "WallPaper")
+            return str(value or "")
+    except OSError:
+        return ""

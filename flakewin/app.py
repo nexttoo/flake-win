@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import random
 import sys
 
 from PySide6.QtCore import QPointF, Qt, QTimer
@@ -184,6 +185,23 @@ class FlakeApp:
         act = menu.addAction("Снеговик (поставить)")
         act.triggered.connect(self._spawn_snowman)
 
+        train_menu = menu.addMenu("Паровозик")
+        act = train_menu.addAction("Пустить сейчас")
+        act.triggered.connect(self._summon_train)
+        act = train_menu.addAction("Катается сам")
+        act.setCheckable(True)
+        act.setChecked(bool(sim.train_runner.enabled))
+        act.triggered.connect(self._toggle_train)
+
+        wallpaper_menu = menu.addMenu("Новогодние обои")
+        act = wallpaper_menu.addAction("Ночная зима")
+        act.triggered.connect(lambda: self._apply_wallpaper("night"))
+        act = wallpaper_menu.addAction("Морозное утро")
+        act.triggered.connect(lambda: self._apply_wallpaper("frost"))
+        wallpaper_menu.addSeparator()
+        act = wallpaper_menu.addAction("Вернуть прежние")
+        act.triggered.connect(self._restore_wallpaper)
+
         menu.addSeparator()
 
         act = menu.addAction("Скрывать снег над развёрнутыми окнами")
@@ -225,12 +243,64 @@ class FlakeApp:
 
     # ------------------------------------------------------------------ #
     def _spawn_snowman(self) -> None:
+        """Поставить снеговика на видное место — на кромку самого широкого окна."""
         sim = self.sim
-        x = sim.mouse_x if sim.mouse_x > -9000 else self.engine.world.bounds().center().x()
-        y = sim.mouse_y if sim.mouse_y > -9000 else self.engine.world.bounds().center().y()
-        man = Snowman(x, y, 46.0, 24.0, 13.0)
-        sim.snowmen.append(man)
-        self._toast("Снеговик поставлен")
+        ledges = [lg for lg in sim.snapshot.ledges if lg.can_accumulate]
+        windows = [lg for lg in ledges if not lg.is_taskbar and lg.width >= 320]
+        target = max(windows, key=lambda lg: lg.width) if windows else None
+        if target is None and ledges:
+            target = max(ledges, key=lambda lg: lg.width)
+
+        if target is not None:
+            x = target.x + target.width * random.uniform(0.34, 0.66)
+            y = target.top - 30.0
+        else:
+            bounds = self.engine.world.bounds()
+            x = bounds.center().x()
+            y = bounds.center().y()
+
+        man = sim.place_snowman(x, y)
+        state = "на окне" if man.resting else "падает на кромку"
+        self._toast(f"Снеговик поставлен ({state}) — иногда кидает снежки")
+
+    def _summon_train(self) -> None:
+        self.sim.train_runner.summon()
+        self._toast("Паровозик выехал чистить снег")
+
+    def _toggle_train(self) -> None:
+        enabled = not self.sim.train_runner.enabled
+        self.sim.train_runner.enabled = enabled
+        self.settings["train_enabled"] = enabled
+        if enabled:
+            self.sim.train_runner.cooldown = min(self.sim.train_runner.cooldown, 8.0)
+
+    def _apply_wallpaper(self, variant: str) -> None:
+        from PySide6.QtGui import QGuiApplication
+
+        from .wallpaper import apply_wallpaper
+
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            self._toast("Не удалось определить экран")
+            return
+        dpr = float(screen.devicePixelRatio() or 1.0)
+        geometry = screen.geometry()
+        path = apply_wallpaper(
+            int(geometry.width() * dpr), int(geometry.height() * dpr),
+            variant, self.settings,
+        )
+        if path:
+            self._toast("Новогодние обои поставлены")
+        else:
+            self._toast("Не удалось поставить обои")
+
+    def _restore_wallpaper(self) -> None:
+        from .wallpaper import restore_wallpaper
+
+        if restore_wallpaper(self.settings):
+            self._toast("Прежние обои вернулись")
+        else:
+            self._toast("Прежние обои не сохранены")
 
     def _ask_sign(self, man: Snowman) -> None:
         text, ok = QInputDialog.getText(
@@ -250,7 +320,10 @@ class FlakeApp:
             "• Зажмите кнопку мыши и покатайте по сугробу — слепится снежок\n"
             "• Отпустите с размахом — снежок полетит\n"
             "• Три снежка друг на друге → снеговик\n"
-            "• Правый клик по снеговику — табличка с надписью\n\n"
+            "• Снеговика можно перетащить ЛКМ, он сам иногда кидает снежки\n"
+            "• Правый клик по снеговику — табличка с надписью\n"
+            "• Паровозик катается по панели задач и расчищает снег\n"
+            "• «Новогодние обои» ставят зимнюю картинку на рабочий стол\n\n"
             "Вдохновлено Flake для macOS (github.com/ArturTonoyan/flake).",
         )
 

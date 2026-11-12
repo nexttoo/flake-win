@@ -89,6 +89,50 @@ def main() -> int:
     for _ in range(20):
         sim._plow_or_scoop(dt)
     print(f"plow: peak {before:.1f} -> {surface.peak:.1f}")
+
+    # --- снеговик: постановка, устойчивость, собственные броски ---
+    print("--- снеговик ---")
+    sim.snowmen.clear()
+    sim.balls.clear()
+    sim.mouse_x, sim.mouse_y = 20.0, 20.0  # мышь далеко, наведения нет
+    man = sim.place_snowman(600.0, 150.0)
+    print(f"поставлен: resting={man.resting} x={man.x:.0f} y={man.y:.0f}"
+          f" base_r={man.base_r:.1f}")
+    throws = 0
+    for _ in range(30 * 40):
+        sim.snapshot = Snapshot(ledges=ledges, occluders=occluders, blocked=[],
+                                foreground=0, signature=())
+        before_balls = len(sim.balls)
+        sim._update_snowmen(dt)
+        sim._update_balls(dt)
+        if len(sim.balls) > before_balls:
+            throws += 1
+    alive = man in sim.snowmen
+    print(f"через 40 с: на месте={alive} resting={man.resting}"
+          f" бросков={throws} снежков={len(sim.balls)}")
+
+    # --- паровозик ---
+    print("--- паровозик ---")
+    sim.train_runner.enabled = True
+    sim.train_runner.cooldown = 0.0
+    sim.train_runner.update(0.0, sim)
+    train = sim.train_runner.train
+    print("поезд:", "-" if train is None else
+          f"x={train.x:.0f} dir={train.direction}")
+    bar_surface = sim.surfaces["taskbar"]
+    before_sum = float(bar_surface.h.sum())
+    before_peak = bar_surface.peak
+    moved = 0.0
+    if train is not None:
+        start_x = train.x
+        for _ in range(30 * 14):
+            sim.train_runner.update(dt, sim)
+            if sim.train_runner.train is not None:
+                moved = abs(sim.train_runner.train.x - start_x)
+    after_sum = float(bar_surface.h.sum())
+    print(f"панель задач: суммарный снег {before_sum:.0f} -> {after_sum:.0f}"
+          f" (peak {before_peak:.1f} -> {bar_surface.peak:.1f}),"
+          f" проехал {moved:.0f} px, дым={len(train.puffs) if train else 0}")
     return 0
 
 

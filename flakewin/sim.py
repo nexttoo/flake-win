@@ -11,6 +11,7 @@ from PySide6.QtCore import QRectF
 
 from .drifts import Surface
 from .tracker import Occluder, Snapshot, WindowTracker
+from .train import TrainRunner
 from .world import World
 
 GRAVITY = 1500.0
@@ -66,6 +67,9 @@ class Snowman:
     perform_cd: float = 0.0
     throw_side: float = -1.0
     throw_released: bool = False
+    was_near: bool = False
+    idle_throw_cd: float = 0.0
+    idle_throw: bool = False
 
     PERFORM_DURATION = 1.35
     STACK_END = 0.60
@@ -269,6 +273,7 @@ class Simulator:
         self._missing: dict[str, float] = {}
         self.balls: list[Snowball] = []
         self.snowmen: list[Snowman] = []
+        self.train_runner = TrainRunner()
         self.snapshot: Snapshot = Snapshot()
 
         self.intensity = float(settings["intensity"])
@@ -291,6 +296,7 @@ class Simulator:
 
         self.held_ball: int | None = None
         self.rolling_ball: int | None = None
+        self.held_snowman: Snowman | None = None
         self.forming_mass = 0.0
         self.flick_vx = 0.0
         self.flick_vy = 0.0
@@ -329,6 +335,7 @@ class Simulator:
             self.rolling_ball = None
         self._update_balls(dt)
         self._update_snowmen(dt)
+        self.train_runner.update(dt, self)
         self._settle_drifts()
         self._apply_melt(dt)
         self._was_down = self.mouse_down
@@ -549,7 +556,8 @@ class Simulator:
     # ------------------------------------------------------------------ #
     def _handle_mouse(self, dt: float) -> None:
         self._wake_flakes(dt)
-        self._plow_or_scoop(dt)
+        if self.held_snowman is None:
+            self._plow_or_scoop(dt)
 
         if self.mouse_down and not self._was_down:
             self._grab()
@@ -653,6 +661,18 @@ class Simulator:
 
     # ------------------------------------------------------------------ #
     def _grab(self) -> None:
+        # Снеговик в приоритете: его можно переставить, а не разобрать на снежок.
+        man = self.snowman_at(self.mouse_x, self.mouse_y)
+        if man is not None:
+            man.held = True
+            man.resting = None
+            man.perform_t = 0.0
+            man.throw_released = False
+            man.idle_throw = False
+            man.vy = 0.0
+            self.held_snowman = man
+            return
+
         best = None
         best_d = None
         for i, ball in enumerate(self.balls):
@@ -666,20 +686,14 @@ class Simulator:
             self.balls[best].resting = None
             return
 
-        for i, man in enumerate(self.snowmen):
-            if (abs(man.x - self.mouse_x) < man.base_r * 1.4
-                    and man.top_y - 10 < self.mouse_y < man.y + man.base_r):
-                self.snowmen.pop(i)
-                ball = Snowball(man.x, man.y, 0, 0, man.base_mass + man.mid_mass * 0.6)
-                self.balls.append(ball)
-                self.held_ball = len(self.balls) - 1
-                ball.held = True
-                return
-
         if self.forming_mass >= BALL_SPAWN_THRESHOLD:
             self._grow_or_spawn_ball(0.0, self.mouse_x, self.mouse_y, 0.0, 0.0)
 
     def _release(self) -> None:
+        if self.held_snowman is not None:
+            self._place_held_snowman()
+            return
+
         idx = self.held_ball
         if idx is None and self.rolling_ball is not None:
             idx = self.rolling_ball
@@ -700,20 +714,34 @@ class Simulator:
         self.rolling_ball = None
         self.forming_mass = 0.0
 
-    def _right_click(self) -> None:
-        idx = self._snowman_at(self.mouse_x, self.mouse_y)
-        if idx is not None and self.on_sign_request is not None:
-            self.on_sign_request(self.snowmen[idx])
+    def _place_held_snowman(self) -> None:
+        """Отпустили снеговика — ставим на кромку под ним, иначе пусть падает."""
+        man = self.held_snowman
+        self.held_snowman = None
+        if man is None:
+            return
+        man.held = False
+        foot = man.y + man.base_r * 0.75
+        ledge = self._best_ledge_for(man.x, foot, max_dy=180.0)
+        if ledge is not None:
+            surface = self.surfaces.get(ledge.id)
+            local = max(3.0, min(ledge.width - 3.0, man.x - ledge.x))
+            pile = surface.height_at(local) if surface else 0.0
+            man.x = ledge.x + local
+            man.y = ledge.top - pile - man.base_r * 0.75
+            man.resting = ledge.id
+            man.vy = 0.0
+            if surface is not None:
+                surface.restore_mound(local, 11.0, 28.0)
+        else:
+            man.vy = 30.0
+        man.perform_cd = 2.5
+        man.was_near = True
 
-    def _snowman_at(self, x: float, y: float) -> int | None:
-        best, best_d = None, None
-        for i, man in enumerate(self.snowmen):
-            cx = man.x
-            cy = (man.top_y + man.y) * 0.5
-            d = math.hypot(x - cx, y - cy)
-            if d < man.base_r * 1.9 and (best_d is None or d < best_d):
-                best, best_d = i, d
-        return best
+    def _right_click(self) -> None:
+        man = self.snowman_at(self.mouse_x, self.mouse_y)
+        if man is not None and self.on_sign_request is not None:
+            self.on_sign_request(man)
 
     # ------------------------------------------------------------------ #
     def _grow_or_spawn_ball(self, mass: float, x: float, y: float,
@@ -936,13 +964,90 @@ class Simulator:
     # ------------------------------------------------------------------ #
     #  Снеговики
     # ------------------------------------------------------------------ #
+    def _ledge_by_id(self, lid: str):
+        for ledge in self.snapshot.ledges:
+            if ledge.id == lid:
+                return ledge, self.surfaces.get(lid)
+        return None, None
+
+    def _best_ledge_for(self, x: float, y: float, max_dy: float = 260.0):
+        """Кромка, на которую логично поставить снеговика рядом с точкой."""
+        best = None
+        best_score = None
+        for ledge in self.snapshot.ledges:
+            if not (ledge.x - 8 <= x <= ledge.x + ledge.width + 8):
+                continue
+            dy = abs(ledge.top - y)
+            if dy > max_dy:
+                continue
+            # Предпочитаем кромку чуть ниже точки (ставим «на окно»).
+            score = dy + (12.0 if ledge.top > y + 4 else 0.0)
+            if best_score is None or score < best_score:
+                best, best_score = ledge, score
+        return best
+
+    def place_snowman(self, x: float, y: float) -> Snowman:
+        """Поставить снеговика на ближайшую кромку (или уронить вниз)."""
+        man = Snowman(x, y, 46.0, 24.0, 13.0)
+        ledge = self._best_ledge_for(x, y)
+        if ledge is not None:
+            surface = self.surfaces.get(ledge.id)
+            local = max(3.0, min(ledge.width - 3.0, x - ledge.x))
+            pile = surface.height_at(local) if surface else 0.0
+            man.x = ledge.x + local
+            man.y = ledge.top - pile - man.base_r * 0.75
+            man.vy = 0.0
+            man.resting = ledge.id
+            if surface is not None:
+                surface.restore_mound(local, 11.0, 28.0)
+        man.perform_cd = 3.0
+        man.was_near = True
+        man.idle_throw_cd = random.uniform(5.0, 10.0)
+        self.snowmen.append(man)
+        return man
+
+    def snowman_at(self, x: float, y: float) -> Snowman | None:
+        for man in self.snowmen:
+            if (abs(man.x - x) < man.base_r * 1.6
+                    and man.top_y - 12 < y < man.y + man.base_r):
+                return man
+        return None
+
+    def _snowman_idle(self, man: Snowman, dt: float) -> None:
+        """Реакция на наведение и собственные броски раз в несколько секунд."""
+        d = math.hypot(self.mouse_x - man.x,
+                       self.mouse_y - (man.mid_y - man.mid_r * 0.4))
+        near = d < man.mid_r * 2.6
+        if (near and not man.was_near and man.perform_cd <= 0.0
+                and not self.mouse_down and self.mouse_enabled):
+            man.perform_t = 0.0001
+            man.throw_side = -1.0 if self.mouse_x < man.x else 1.0
+            man.throw_released = False
+            man.idle_throw = False
+            man.perform_cd = 4.0
+        man.was_near = near
+
+        man.idle_throw_cd -= dt
+        if man.idle_throw_cd <= 0.0 and man.perform_cd <= 0.0:
+            man.idle_throw_cd = random.uniform(8.0, 18.0)
+            man.perform_t = 0.0001
+            man.throw_side = random.choice((-1.0, 1.0))
+            man.throw_released = False
+            man.idle_throw = True
+            man.perform_cd = 3.0
+
     def _update_snowmen(self, dt: float) -> None:
         if not self.snowmen:
             return
+        bounds = self.world.bounds()
         for man in list(self.snowmen):
+            base_r = man.base_r
+
             if man.held:
                 man.x = self.mouse_x
-                man.y = self.mouse_y + man.base_r
+                man.y = self.mouse_y + base_r * 0.9
+                man.vx = 0.0
+                man.vy = 0.0
                 continue
 
             man.perform_cd = max(0.0, man.perform_cd - dt)
@@ -951,55 +1056,75 @@ class Simulator:
                 man.perform_t += dt
                 if not man.throw_released and man.throw_t > 0.45:
                     man.throw_released = True
-                    self._snowman_throw(man)
+                    self._snowman_throw(man, idle=man.idle_throw)
                 if man.perform_t >= Snowman.PERFORM_DURATION:
                     man.perform_t = 0.0
                     man.throw_released = False
-                    man.perform_cd = 1.6
+                    man.idle_throw = False
+                    man.perform_cd = max(man.perform_cd, 2.2)
+                    man.idle_throw_cd = random.uniform(8.0, 16.0)
                 continue
 
-            if self.mouse_enabled and man.perform_cd <= 0.0:
-                d = math.hypot(self.mouse_x - man.x, self.mouse_y - (man.mid_y - man.mid_r * 0.4))
-                if d < man.mid_r * 2.4 and not self.mouse_down:
-                    man.perform_t = 0.0001
-                    man.throw_side = -1.0 if self.mouse_x < man.x else 1.0
-                    man.throw_released = False
-                    continue
-
-            # Опора под снеговиком исчезла — падает.
+            # Стоит на кромке — держим на сугробе.
             if man.resting is not None:
-                surface = self.surfaces.get(man.resting)
-                ledge = next((lg for lg in self.snapshot.ledges if lg.id == man.resting), None)
+                ledge, surface = self._ledge_by_id(man.resting)
                 if ledge is None:
                     man.resting = None
                 else:
                     local = max(0.0, min(ledge.width, man.x - ledge.x))
                     pile = surface.height_at(local) if surface else 0.0
-                    man.y = ledge.top - pile - man.base_r * 0.75
+                    man.y = ledge.top - pile - base_r * 0.75
                     man.vy = 0.0
+                    self._snowman_idle(man, dt)
                     continue
+
+            # Падает: проверяем пересечение кромки с учётом шага за кадр.
+            prev_y = man.y
             man.vy += GRAVITY * dt
             man.y += man.vy * dt
+            landed = False
             for ledge in self.snapshot.ledges:
                 if not (ledge.x - 4 <= man.x <= ledge.x + ledge.width + 4):
                     continue
                 surface = self.surfaces.get(ledge.id)
                 pile = surface.height_at(man.x - ledge.x) if surface else 0.0
                 ground = ledge.top - pile
-                if man.y + man.base_r * 0.75 >= ground >= man.y - man.base_r:
-                    man.y = ground - man.base_r * 0.75
+                if (prev_y + base_r * 0.75 <= ground + 1.5
+                        and man.y + base_r * 0.75 >= ground):
+                    man.y = ground - base_r * 0.75
                     man.vy = 0.0
                     man.resting = ledge.id
                     if surface is not None:
                         surface.restore_mound(man.x - ledge.x, 11.0, 28.0)
+                    landed = True
                     break
-            if man.y > self.world.bounds().bottom() + 300:
-                self.snowmen.remove(man)
+            if landed:
+                man.perform_cd = max(man.perform_cd, 1.0)
+                continue
 
-    def _snowman_throw(self, man: Snowman) -> None:
+            # Улетел ниже экрана — возвращаем на панель задач, а не удаляем.
+            if man.y > bounds.bottom() + 40:
+                bar = next((lg for lg in self.snapshot.ledges if lg.is_taskbar), None)
+                if bar is None:
+                    self.snowmen.remove(man)
+                    continue
+                man.x = max(bar.x + 60.0, min(bar.x + bar.width - 60.0, man.x))
+                surface = self.surfaces.get(bar.id)
+                local = man.x - bar.x
+                pile = surface.height_at(local) if surface else 0.0
+                man.y = bar.top - pile - base_r * 0.75
+                man.vy = 0.0
+                man.resting = bar.id
+                man.perform_cd = 2.0
+
+    def _snowman_throw(self, man: Snowman, idle: bool = False) -> None:
         tx, ty = man.arm_tip(man.throw_side < 0)
-        target_x = self.mouse_x if self.mouse_x > -9000 else man.x + man.throw_side * 300
-        target_y = self.mouse_y if self.mouse_y > -9000 else man.mid_y
+        if idle:
+            target_x = man.x + man.throw_side * random.uniform(240.0, 620.0)
+            target_y = man.mid_y + random.uniform(-80.0, 30.0)
+        else:
+            target_x = self.mouse_x if self.mouse_x > -9000 else man.x + man.throw_side * 300
+            target_y = self.mouse_y if self.mouse_y > -9000 else man.mid_y
         dx = target_x - tx
         dy = target_y - ty
         dist = max(1.0, math.hypot(dx, dy))
@@ -1040,6 +1165,7 @@ class Simulator:
         self.snowmen.clear()
         self.held_ball = None
         self.rolling_ball = None
+        self.held_snowman = None
         self.forming_mass = 0.0
 
     def melt(self) -> None:

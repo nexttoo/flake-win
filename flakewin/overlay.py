@@ -83,6 +83,7 @@ class OverlayEngine(QObject):
         self.tracker = WindowTracker(self.world)
         self.tracker.hide_maximized = bool(settings["hide_on_maximized"])
         self.sim = Simulator(self.world, self.tracker, settings)
+        self.sim.train_runner.enabled = bool(settings["train_enabled"])
         self.renderer = Renderer()
 
         self.overlays: list[SnowOverlay] = []

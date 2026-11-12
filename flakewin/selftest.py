@@ -17,6 +17,7 @@ from .render import Renderer
 from .settings import Settings
 from .sim import Simulator, Snowball, Snowman
 from .tracker import Ledge, Occluder, Snapshot, WindowTracker
+from .train import SmokePuff, Train
 from .world import Screen, World
 
 WINDOWS = (
@@ -145,19 +146,23 @@ def run_selftest(out_path: str, width: int = 1600, height: int = 900) -> int:
 
     # Снеговик на среднем окне и пара снежков.
     name, x, y, w, h = WINDOWS[1]
-    surface = sim.surfaces.get("w1")
-    pile = surface.height_at(w * 0.32) if surface else 0.0
-    man = Snowman(x + w * 0.32, y - pile - 20, 46.0, 24.0, 13.0)
-    man.resting = "w1"
+    man = sim.place_snowman(x + w * 0.34, y - 8)
     man.sign_text = "Привет!"
-    sim.snowmen.append(man)
 
     name2, x2, y2, w2, h2 = WINDOWS[0]
     surface2 = sim.surfaces.get("w0")
     pile2 = surface2.height_at(w2 * 0.68) if surface2 else 0.0
     sim.balls.append(Snowball(x2 + w2 * 0.68, y2 - pile2 - 15, 0, 0, 34.0))
-    surface3 = sim.surfaces.get("taskbar")
     sim.balls.append(Snowball(width * 0.62, height - 46 - 12, 0, 0, 22.0))
+
+    # Паровозик на панели задач.
+    train = Train(x=width * 0.44, rail_y=height - 46, direction=1, wheel=1.1)
+    for i in range(4):
+        train.puffs.append(SmokePuff(
+            x=train.x + 24 + i * 7, y=train.rail_y - 46 - i * 13,
+            life=1.0 - i * 0.2, max_life=1.25, size=4.0 + i * 1.6, drift=-8.0,
+        ))
+    sim.train_runner.train = train
 
     image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
     image.fill(Qt.GlobalColor.black)
@@ -172,4 +177,20 @@ def run_selftest(out_path: str, width: int = 1600, height: int = 900) -> int:
     ok = image.save(out_path, "PNG")
     print(f"selftest: {out_path} -> {ok}, flakes={sim.field.count}, "
           f"surfaces={len(sim.surfaces)}")
+
+    # Заодно проверяем отрисовку обоев (их не ставим на рабочий стол).
+    try:
+        from pathlib import Path
+
+        from .wallpaper import render_wallpaper
+
+        base = Path(out_path)
+        for variant in ("night", "frost"):
+            wall = render_wallpaper(1280, 720, variant)
+            wall_path = base.with_name(f"{base.stem}-wallpaper-{variant}.png")
+            wall_ok = wall.save(str(wall_path), "PNG")
+            print(f"wallpaper {variant}: {wall_path} -> {wall_ok}")
+    except Exception as error:  # noqa: BLE001
+        print(f"wallpaper selftest failed: {error}")
+        return 1
     return 0 if ok else 1

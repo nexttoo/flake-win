@@ -116,9 +116,108 @@ class Renderer:
             p.setClipRect(screen_rect)
 
         self._draw_drifts(p, sim, dpr, screen_rect)
+        self._draw_train(p, sim)
         self._draw_flakes(p, sim, dpr, screen_rect)
         self._draw_snowmen(p, sim)
         self._draw_balls(p, sim)
+
+    # ------------------------------------------------------------------ #
+    def _draw_train(self, p: QPainter, sim: Simulator) -> None:
+        train = sim.train_runner.train
+        if train is None:
+            return
+
+        # Дым из трубы.
+        p.setPen(Qt.PenStyle.NoPen)
+        for puff in train.puffs:
+            fade = max(0.0, min(1.0, puff.life / puff.max_life))
+            p.setBrush(QBrush(QColor(226, 233, 244, int(105 * fade))))
+            p.drawEllipse(QPointF(puff.x, puff.y), puff.size, puff.size)
+
+        p.save()
+        p.translate(train.x, train.rail_y)
+        # Локальная схема нарисована «отвалом влево», поэтому при движении
+        # вправо её надо отразить.
+        p.scale(-float(train.direction), 1.0)
+
+        # Вагонетка позади локомотива (в локальных координатах — за будкой).
+        p.setBrush(QBrush(QColor(52, 64, 82)))
+        p.drawRoundedRect(QRectF(80, -30, 34, 21), 3, 3)
+        p.setBrush(QBrush(QColor(248, 251, 255)))
+        p.drawRoundedRect(QRectF(80, -33, 34, 6), 3, 3)
+        p.setBrush(QBrush(QColor(72, 86, 106)))
+        p.drawRect(QRectF(86, -26, 8, 12))
+        p.drawRect(QRectF(98, -26, 8, 12))
+
+        # Отвал впереди.
+        p.setBrush(QBrush(QColor(176, 184, 196)))
+        p.drawPolygon(QPolygonF([
+            QPointF(2, -2), QPointF(30, -2), QPointF(24, -30), QPointF(4, -20),
+        ]))
+        p.setBrush(QBrush(QColor(122, 132, 148)))
+        p.drawPolygon(QPolygonF([QPointF(2, -2), QPointF(11, -2), QPointF(7, -15)]))
+        p.setBrush(QBrush(QColor(252, 254, 255)))
+        p.drawPolygon(QPolygonF([
+            QPointF(24, -30), QPointF(29, -22), QPointF(25, -18), QPointF(21, -25),
+        ]))
+
+        # Котёл.
+        p.setBrush(QBrush(QColor(150, 46, 46)))
+        p.drawRoundedRect(QRectF(16, -34, 48, 25), 5, 5)
+        p.setBrush(QBrush(QColor(214, 178, 92)))
+        p.drawRect(QRectF(31, -34, 3, 25))
+        p.drawRect(QRectF(47, -34, 3, 25))
+        p.setBrush(QBrush(QColor(238, 246, 255)))
+        p.drawRoundedRect(QRectF(18, -37, 44, 5), 2.5, 2.5)
+
+        # Будка.
+        p.setBrush(QBrush(QColor(126, 38, 38)))
+        p.drawRoundedRect(QRectF(50, -52, 22, 43), 3, 3)
+        p.setBrush(QBrush(QColor(88, 28, 28)))
+        p.drawRoundedRect(QRectF(48, -56, 26, 6), 2, 2)
+        p.setBrush(QBrush(QColor(250, 253, 255)))
+        p.drawRoundedRect(QRectF(47, -59, 28, 4.5), 2, 2)
+        p.setBrush(QBrush(QColor(255, 214, 120)))
+        p.drawRoundedRect(QRectF(55, -46, 12, 11), 2, 2)
+        p.setBrush(QBrush(QColor(255, 240, 190)))
+        p.drawRoundedRect(QRectF(57, -44, 8, 7), 1, 1)
+
+        # Труба.
+        p.setBrush(QBrush(QColor(60, 60, 66)))
+        p.drawRect(QRectF(22, -46, 9, 13))
+        p.setBrush(QBrush(QColor(40, 40, 46)))
+        p.drawRoundedRect(QRectF(20, -49, 13, 4), 1.5, 1.5)
+        p.setBrush(QBrush(QColor(252, 254, 255)))
+        p.drawRoundedRect(QRectF(19, -51.5, 15, 3.5), 1.5, 1.5)
+
+        # Фара и её отсвет.
+        p.setBrush(QBrush(QColor(255, 236, 170, 90)))
+        p.drawEllipse(QPointF(20, -26), 6.5, 6.5)
+        p.setBrush(QBrush(QColor(255, 244, 205)))
+        p.drawEllipse(QPointF(17, -26), 3.0, 3.0)
+
+        # Колёса.
+        for cx, cy, radius in ((28.0, -9.0, 8.5), (46.0, -9.0, 8.5),
+                               (64.0, -7.0, 6.0), (88.0, -9.0, 7.5),
+                               (102.0, -9.0, 7.5)):
+            p.setBrush(QBrush(QColor(36, 38, 44)))
+            p.drawEllipse(QPointF(cx, cy), radius, radius)
+            p.setBrush(QBrush(QColor(122, 128, 138)))
+            p.drawEllipse(QPointF(cx, cy), radius * 0.55, radius * 0.55)
+            pen = QPen(QColor(72, 76, 84))
+            pen.setWidthF(1.2)
+            p.setPen(pen)
+            for k in range(3):
+                angle = train.wheel + k * math.pi / 3.0
+                p.drawLine(
+                    QPointF(cx - math.cos(angle) * radius * 0.8,
+                            cy - math.sin(angle) * radius * 0.8),
+                    QPointF(cx + math.cos(angle) * radius * 0.8,
+                            cy + math.sin(angle) * radius * 0.8),
+                )
+            p.setPen(Qt.PenStyle.NoPen)
+
+        p.restore()
 
     # ------------------------------------------------------------------ #
     def _draw_flakes(self, p: QPainter, sim: Simulator, dpr: float,
@@ -422,10 +521,11 @@ class Renderer:
             tw = fm.horizontalAdvance(text)
         w = max(26.0, tw + pad_x * 2)
         h = max(16.0, fm.height() + pad_y * 2)
-        rect = QRectF(ax - w * 0.5, ay - h * 0.5, w, h)
+        hand_x, hand_y = man.arm_tip(False)
+        # Табличка висит на руке и не закрывает туловище.
+        rect = QRectF(hand_x - 3.0, ay - h * 0.5, w, h)
 
         # Шест от руки к табличке.
-        hand_x, hand_y = man.arm_tip(False)
         stick = QPen(QColor(102, 61, 31))
         stick.setWidthF(1.5)
         stick.setCapStyle(Qt.PenCapStyle.RoundCap)

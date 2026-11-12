@@ -13,6 +13,8 @@ DEFAULTS = {
     "mouse_enabled": True,
     "paused": False,
     "hide_on_maximized": False,
+    "train_enabled": True,
+    "wallpaper_backup": "",
     "autostart": False,
     "lan_enabled": False,
     "lan_name": "",
