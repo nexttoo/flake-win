@@ -322,8 +322,12 @@ class FlakeApp:
 
     def _toggle_music(self, checked: bool) -> None:
         self.engine.set_music_enabled(bool(checked))
-        self._toast("Музыка под уборку включена" if checked
-                    else "Музыка под уборку выключена")
+        if checked:
+            # Сразу слышно, что мелодия включилась.
+            self.engine.music.preview(3.0)
+            self._toast("Музыка под уборку включена")
+        else:
+            self._toast("Музыка под уборку выключена")
 
     def _set_music_volume(self, value: int) -> None:
         self.engine.set_music_volume(value)

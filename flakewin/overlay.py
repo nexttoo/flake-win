@@ -216,7 +216,7 @@ class OverlayEngine(QObject):
         # Музыка едет вместе с паровозиком: выехал — появляется, уехал — стихает.
         if self.sim.train_runner.train is not None and not self.sim.paused:
             self.music.start()
-        else:
+        elif not self.music.previewing():
             self.music.stop()
         self.music.update(dt)
 

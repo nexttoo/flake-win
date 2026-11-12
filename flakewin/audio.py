@@ -67,6 +67,7 @@ class TrainMusic:
         self.volume = max(0, min(100, int(volume)))
         self._opened = False
         self._want = False
+        self._preview = 0.0
         self._level = 0.0
         self._check_cd = 0.0
 
@@ -103,6 +104,14 @@ class TrainMusic:
         """Поезд уехал — мелодия стихает (само затухание идёт в update)."""
         self._want = False
 
+    def preview(self, seconds: float = 3.0) -> None:
+        """Короткий фрагмент — например, когда музыку только включили."""
+        self._preview = max(self._preview, seconds)
+        self.start()
+
+    def previewing(self) -> bool:
+        return self._preview > 0.0
+
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = bool(enabled) and self.path is not None
         if not self.enabled:
@@ -115,6 +124,11 @@ class TrainMusic:
 
     # ------------------------------------------------------------------ #
     def update(self, dt: float) -> None:
+        if self._preview > 0.0:
+            self._preview = max(0.0, self._preview - dt)
+            if self._preview <= 0.0:
+                self._want = False
+
         if not self._opened:
             return
 
